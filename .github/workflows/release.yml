@@ -78,15 +78,39 @@ jobs:
           path: tokenstack-standalone.zip
           retention-days: 30
 
-      - name: Attach zip to GitHub release
+      # Tag push: create the release and attach the zip in one step.
+      # softprops/action-gh-release creates the release when it does not exist yet.
+      - name: Create release and attach zip (tag push)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
+        with:
+          name: ${{ github.ref_name }} — standalone bundle
+          body: |
+            ## Standalone bundle — no Python or internet required
+
+            1. Download **tokenstack-standalone.zip** below
+            2. Extract anywhere
+            3. Run:
+               ```powershell
+               .\bootstrap.ps1 -ProjectPath C:\code\my-app
+               ```
+
+            The zip contains a pre-built venv with headroom, token-savior, and
+            graphify already installed. No pip, no internet, no Python on PATH needed.
+          files: tokenstack-standalone.zip
+          generate_release_notes: false
+
+      # release event: zip was already attached to a manually-published release
+      - name: Attach zip to manually-published release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           files: tokenstack-standalone.zip
 
+      # workflow_dispatch with an explicit tag
       - name: Attach zip to existing release (manual dispatch)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.attach_to_release != ''
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           tag_name: ${{ github.event.inputs.attach_to_release }}
           files: tokenstack-standalone.zip
