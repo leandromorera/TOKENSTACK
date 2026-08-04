@@ -1,0 +1,8 @@
+# Node build inputs: the dist/ bundle IS committed so the panel runs without
+# Node, but nothing else here needs to be.
+app/node_modules/
+app/.vite/
+
+# The repo root ignores dist/ everywhere. This one is a shipped artifact, not a
+# build leftover - without it token-stack-web.ps1 needs Node to do anything.
+!app/dist/

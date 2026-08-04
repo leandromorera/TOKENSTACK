@@ -1,0 +1,160 @@
+{
+  "project-box": {
+    "g": "Project", "t": "Project path",
+    "d": "The repository to configure. Typing a path or picking one with Browse refreshes the state panel immediately, so you can inspect a project without installing anything. Nothing is written until you click Install or Uninstall.",
+    "c": "-ProjectPath C:\\code\\my-app"
+  },
+  "browse-btn": {
+    "g": "Project", "t": "Browse...",
+    "d": "Opens a folder picker seeded with whatever is currently in the path box. Selecting a folder refreshes every indicator."
+  },
+  "dryrun-chk": {
+    "g": "Options", "t": "Dry run (write nothing)",
+    "d": "Prints every action the installer would take and touches no files. Applies to Install and to Uninstall.",
+    "c": "-DryRun"
+  },
+  "skipproxy-chk": {
+    "g": "Options", "t": "Skip proxy wiring",
+    "d": "Installs everything but leaves ANTHROPIC_BASE_URL unset, so Claude Code in this project does not depend on the proxy being up.",
+    "c": "-SkipProxy",
+    "n": "Use this if you would rather start the proxy by hand than couple the project to it."
+  },
+  "upgrade-chk": {
+    "g": "Options", "t": "Upgrade tool packages",
+    "d": "Re-installs the three tool packages in the shared venv with --upgrade. Without it, anything already present is skipped, which is what makes re-runs fast.",
+    "c": "-Upgrade"
+  },
+  "port-box": {
+    "g": "Options", "t": "Port",
+    "d": "The Headroom proxy port, default 8787. This one value drives three things: what gets written to ANTHROPIC_BASE_URL, which port the Proxy process indicator probes, and which port Start proxy uses.",
+    "c": "-Port 8787"
+  },
+  "tools-box": {
+    "g": "Options", "t": "Tools home",
+    "d": "Where the shared venv lives, default ~/.token-tools. One venv holds the tool binaries and is reused by every project you install into \u2014 the tools are never installed into a project's own interpreter.",
+    "c": "-ToolsHome C:\\Users\\you\\.token-tools",
+    "n": "Installing Headroom into a project's environment pulls its own fastapi/pydantic/openai and can silently upgrade pinned versions. The separate venv exists to prevent exactly that."
+  },
+  "preview-btn": {
+    "g": "Install", "t": "Preview (dry run)",
+    "d": "Always a dry run, whatever the Dry run box says. The safe first click on any project: it prints the full plan and writes nothing.",
+    "c": ".\\install.ps1 -ProjectPath <p> -DryRun"
+  },
+  "install-btn": {
+    "g": "Install", "t": "Install",
+    "d": "Runs the installer for real, honouring every option above. Idempotent \u2014 re-running skips installed packages, does not duplicate the .gitignore block, and preserves MCP servers you added yourself. Disabled when the project path does not exist.",
+    "c": ".\\install.ps1 -ProjectPath <p>"
+  },
+  "uninstall-btn": {
+    "g": "Install", "t": "Uninstall",
+    "d": "Removes exactly the three MCP keys and the ANTHROPIC_BASE_URL entry this stack added, deleting each file only if that leaves it empty. Asks for confirmation first.",
+    "c": ".\\install.ps1 -ProjectPath <p> -Uninstall",
+    "n": "metrics.jsonl is never deleted \u2014 your measurement history survives an uninstall."
+  },
+  "removetools-chk": {
+    "g": "Install", "t": "also delete shared venv",
+    "d": "With Uninstall, also deletes the shared venv. Other projects use it, so the confirmation dialog calls this out separately.",
+    "c": "-Uninstall -RemoveTools"
+  },
+  "cancel-btn": {
+    "g": "Install", "t": "Cancel",
+    "d": "Stops the running background job. Enabled only while something is running.",
+    "n": "A part-finished install is repaired by clicking Install again \u2014 the installer is idempotent."
+  },
+  "proxy-btn": {
+    "g": "Run and measure", "t": "Start proxy",
+    "d": "Launches Headroom in its own visible console window rather than a background job, because it is long-lived and you need somewhere to watch it and press Ctrl+C. If something is already listening on the port it says so instead of starting a second one.",
+    "c": "& \"$env:USERPROFILE\\.token-tools\\venv\\Scripts\\headroom.exe\" proxy"
+  },
+  "measure-btn": {
+    "g": "Run and measure", "t": "Measure",
+    "d": "Runs collect.py with the label beside it. Each run appends one record to metrics.jsonl and never overwrites, so before/after comparisons stay reproducible.",
+    "c": "python tools\\token-metrics\\collect.py --label baseline",
+    "n": "It runs on the shared venv's Python, which carries tiktoken \u2014 so measuring never involves the project's own interpreter."
+  },
+  "label-box": {
+    "g": "Run and measure", "t": "label",
+    "d": "The name recorded with this measurement. Use baseline before you change how you work, then any name you like afterwards.",
+    "c": "--label baseline"
+  },
+  "dashboard-btn": {
+    "g": "Run and measure", "t": "Dashboard",
+    "d": "Renders a standalone dashboard.html from metrics.jsonl and opens it in your browser. No build step, no server. Needs at least one measurement to plot.",
+    "c": "python tools\\token-metrics\\dashboard.py --open"
+  },
+  "graphify-btn": {
+    "g": "Run and measure", "t": "Link graphify",
+    "d": "The second installer pass. graphify serves an existing graph, so the installer wires it only once graphify-out/graph.json is on disk. This button checks the graph is really there first, and tells you to run /graphify if it is not.",
+    "c": ".\\install.ps1 -ProjectPath <p>",
+    "n": "Wiring an MCP server at a missing graph.json makes Claude Code report a failed server on every session. That is why it is two passes and not one."
+  },
+  "folder-btn": {
+    "g": "Project", "t": "Open folder",
+    "d": "Opens a folder picker that walks the filesystem, marks git repositories, and filters as you type. Choosing a folder writes its path into the box; the state panel refreshes straight away.",
+    "c": "GET /api/browse?path=<dir>",
+    "n": "It browses the machine running the server, not the one running the browser - a browser file dialog is not allowed to hand a real directory path back to a page. Over an SSH tunnel that is the end you want. The picker also has an Open in Explorer button for the old behaviour."
+  },
+  "refresh-btn": {
+    "g": "Current state", "t": "Refresh",
+    "d": "Re-reads every indicator. This also happens automatically when a job finishes and when you change the project, port, or tools-home boxes \u2014 so you rarely need it."
+  },
+  "log-box": {
+    "g": "Output", "t": "Output log",
+    "d": "Live output from the running job: everything install.ps1 prints, pip warnings folded in from stderr, and the child process exit code. The exact command being run is echoed at the top so you can copy it.",
+    "n": "Capped at about 4000 lines and trimmed, so a long install does not slow the page down."
+  },
+  "progress": {
+    "g": "Footer", "t": "Progress bar",
+    "d": "An indeterminate bar, visible only while a background job is running."
+  },
+  "status-text": {
+    "g": "Footer", "t": "Status text",
+    "d": "Reads Ready when idle, the name of the running action while busy, then Finished (Completed) or Finished (Failed)."
+  },
+  "st-project": {
+    "g": "Current state", "s": 1, "t": "Project",
+    "d": "Whether the selected path exists and is a git repository. collect.py scopes its corpus with git ls-files rather than walking the filesystem, so measurement does not work outside a repo.",
+    "c": "<project>\\.git",
+    "n": "Amber = not a repo; the install still works, only measurement is affected. Red = the path does not exist, and Install is disabled."
+  },
+  "st-venv": {
+    "g": "Current state", "s": 1, "t": "Tool venv",
+    "d": "How many of headroom.exe, token-savior.exe and graphify.exe are present in the shared venv, as n/3. Green at 3/3, amber if some are missing, grey if the venv has not been built yet.",
+    "c": "<ToolsHome>\\venv\\Scripts\\*.exe",
+    "n": "Amber usually means one package failed to install. The installer warns and continues rather than aborting \u2014 fix the cause and Install again with Upgrade ticked."
+  },
+  "st-mcp": {
+    "g": "Current state", "s": 1, "t": "MCP servers",
+    "d": "The server names currently declared in the project's .mcp.json. Expect token-savior and headroom after an install, plus graphify once the graph is linked. Servers you added yourself appear here too and are preserved by install and uninstall alike.",
+    "c": ".mcp.json -> mcpServers"
+  },
+  "st-wiring": {
+    "g": "Current state", "s": 1, "t": "Proxy wiring",
+    "d": "The ANTHROPIC_BASE_URL value written into .claude/settings.local.json, or grey if it is unset and Claude Code talks to the API directly.",
+    "c": ".claude\\settings.local.json -> env.ANTHROPIC_BASE_URL"
+  },
+  "st-proxy": {
+    "g": "Current state", "s": 1, "t": "Proxy process",
+    "d": "Whether anything is listening on the configured port, tested with a 400 ms TCP probe to 127.0.0.1.",
+    "c": "TcpClient 127.0.0.1:<port>",
+    "danger": 1,
+    "n": "Red means wiring is set but nothing is listening \u2014 Claude Code in this project will fail. This is the state the CLI cannot show you, and it stays invisible until a session breaks. Fix it with Start proxy, or re-install with Skip proxy wiring to drop the coupling."
+  },
+  "st-graphify": {
+    "g": "Current state", "s": 1, "t": "graphify",
+    "d": "Whether graphify-out/graph.json exists, how big it is, and whether it is actually wired into .mcp.json.",
+    "c": "graphify-out\\graph.json",
+    "n": "Amber means the graph is built but not linked \u2014 the second pass everyone forgets. Click Link graphify. Grey means no graph yet: run /graphify inside Claude Code first."
+  },
+  "st-caveman": {
+    "g": "Current state", "s": 1, "t": "caveman",
+    "d": "Whether the caveman plugin is installed. It is user-scoped, not per-project, so once installed it applies to every project at once \u2014 which is why the installer cannot do it for you and prints the two commands instead.",
+    "c": "~\\.claude\\plugins\\marketplaces\\caveman",
+    "n": "caveman compresses assistant output only; input and reasoning tokens are untouched, and the skill text itself costs roughly 1\u20131.5k input tokens per turn. It can be net negative on short sessions."
+  },
+  "st-metrics": {
+    "g": "Current state", "s": 1, "t": "Measurements",
+    "d": "How many records metrics.jsonl holds. One per Measure click, append-only.",
+    "c": "tools\\token-metrics\\metrics.jsonl"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "token-stack-panel",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "React control panel for the token-reduction stack installer.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node scripts/sync-guide.mjs",
+    "sync-guide": "node scripts/sync-guide.mjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11"
+  }
+}
