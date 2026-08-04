@@ -6,6 +6,9 @@ name: Build standalone release
 # and the pre-built React bundle, so the recipient needs no Python, no pip, and
 # no internet access after extracting.
 on:
+  push:
+    tags:
+      - 'v*'
   release:
     types: [created]
   workflow_dispatch:
