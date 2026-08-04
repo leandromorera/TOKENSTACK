@@ -52,24 +52,21 @@ if (-not (Test-Path $WebScript)) {
     throw "token-stack-web.ps1 not found next to bootstrap.ps1. Ensure the bundle was extracted completely."
 }
 
-$extraArgs = @('-ProjectPath', $ProjectPath, '-Port', "$Port")
-if ($NoBrowser) { $extraArgs += '-NoBrowser' }
-
 if (Test-Path $BundledPy) {
-    # Standalone bundle: the venv is right here. Tell token-stack-web.ps1 to
-    # use this directory as ToolsHome so it finds venv\Scripts\python.exe.
     Write-Host ''
     Write-Host '  Token stack - standalone bundle' -ForegroundColor White
     Write-Host "  bundled venv : $Root\venv"
     Write-Host ''
-    & $WebScript @extraArgs -ToolsHome $Root
+    $splat = @{ ProjectPath = $ProjectPath; Port = $Port; ToolsHome = $Root }
+    if ($NoBrowser) { $splat['NoBrowser'] = $true }
+    & $WebScript @args
 } else {
-    # Plain git clone: no bundled venv. Use the default shared-venv location.
-    # The web panel's Install button will create it on first use.
     Write-Host ''
     Write-Host '  Token stack - git clone mode (no bundled venv)' -ForegroundColor DarkYellow
     Write-Host "  tools home   : $DefaultHome"
     Write-Host '  Click Install in the web panel to build the shared venv.' -ForegroundColor DarkYellow
     Write-Host ''
-    & $WebScript @extraArgs -ToolsHome $DefaultHome
+    $splat = @{ ProjectPath = $ProjectPath; Port = $Port; ToolsHome = $DefaultHome }
+    if ($NoBrowser) { $splat['NoBrowser'] = $true }
+    & $WebScript @args
 }
