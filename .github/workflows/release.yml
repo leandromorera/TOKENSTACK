@@ -45,27 +45,29 @@ jobs:
           $out = "tokenstack-standalone"
           New-Item -ItemType Directory $out | Out-Null
 
-          # scripts, docs, gitignore
-          Copy-Item install.ps1, token-stack-web.ps1, token-stack-gui.ps1,
-                    bootstrap.ps1, README.md, .gitignore,
-                    requirements-tools.txt "$out\" -ErrorAction SilentlyContinue
+          # scripts, docs, root files — one per line to avoid multiline parse issues
+          foreach ($f in @('install.ps1','token-stack-web.ps1','token-stack-gui.ps1',
+                           'bootstrap.ps1','README.md','.gitignore','requirements-tools.txt')) {
+            if (Test-Path $f) { Copy-Item $f "$out\" }
+          }
 
-          # metrics harness (payload scripts copied into projects by install.ps1)
+          # metrics harness
           Copy-Item payload "$out\payload" -Recurse
 
-          # web panel: FastAPI backend + pre-built React bundle
-          # node_modules excluded by web/.gitignore so robocopy sees only what matters
+          # web panel — robocopy exit codes 0-7 are all success variants
           robocopy web "$out\web" /E /XD __pycache__ /NFL /NDL /NJH /NJS
-          if ($LASTEXITCODE -ge 8) { throw "robocopy failed ($LASTEXITCODE)" }
+          if ($LASTEXITCODE -ge 8) { throw "robocopy web failed ($LASTEXITCODE)" }
+          $global:LASTEXITCODE = 0
 
-          # pre-built venv: the heavy part (~300-500 MB uncompressed)
-          Write-Host "Copying venv (this takes a moment)..."
+          # pre-built venv (~300-500 MB uncompressed)
+          Write-Host "Copying venv..."
           robocopy bundle\venv "$out\venv" /E /NFL /NDL /NJH /NJS
           if ($LASTEXITCODE -ge 8) { throw "robocopy venv failed ($LASTEXITCODE)" }
+          $global:LASTEXITCODE = 0
 
           # zip
           Write-Host "Compressing..."
-          Compress-Archive "$out\*" tokenstack-standalone.zip
+          Compress-Archive -Path "$out\*" -DestinationPath tokenstack-standalone.zip
           $mb = [math]::Round((Get-Item tokenstack-standalone.zip).Length / 1MB, 1)
           Write-Host "Bundle: tokenstack-standalone.zip ($mb MB)"
 
