@@ -1,0 +1,9 @@
+# Tool packages installed into the shared venv (~/.token-tools/venv).
+# Pin these here so the GitHub Actions release build and manual installs
+# use the same package set. The extras are load-bearing:
+#   headroom-ai[proxy]  -> uvicorn + fastapi (web panel backend)
+#   headroom-ai[mcp]    -> MCP server entry point
+#   headroom-ai[code]   -> Claude Code integration
+headroom-ai[proxy,mcp,code]
+token-savior-recall
+graphifyy

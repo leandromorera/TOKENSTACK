@@ -1,6 +1,34 @@
 # token-stack — portable installer
 
-One command puts the token-reduction stack into any project:
+## Getting started
+
+### Option A — standalone bundle (no Python or internet required)
+
+Download `tokenstack-standalone.zip` from the
+[Releases page](../../releases/latest), extract it anywhere, and run:
+
+```powershell
+.\bootstrap.ps1 -ProjectPath C:\code\my-app
+```
+
+The zip contains a pre-built venv with every tool already installed — no pip,
+no internet, no Python on PATH needed.
+
+### Option B — git clone (Python 3.10+ and internet required)
+
+```powershell
+git clone https://github.com/leandromorera/TOKENSTACK
+cd TOKENSTACK
+.\bootstrap.ps1 -ProjectPath C:\code\my-app
+```
+
+`bootstrap.ps1` detects that no bundled venv is present and opens the web
+control panel. Click **Install** to download the tool packages from PyPI and
+build the shared venv.
+
+---
+
+One command also puts the stack into any project directly from the CLI:
 
 ```powershell
 .\install.ps1 -ProjectPath C:\code\my-app

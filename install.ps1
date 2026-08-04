@@ -62,12 +62,18 @@ param(
 $ErrorActionPreference = 'Stop'
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
-# Package names are not guessable from the command names — pin them here.
-$Packages = @(
-    'headroom-ai[proxy,mcp,code]',   # -> headroom.exe
-    'token-savior-recall',           # -> token-savior.exe
-    'graphifyy'                      # -> graphify.exe
-)
+# Read packages from requirements-tools.txt when it lives next to this script;
+# fall back to the hard-coded list so the script stays self-contained.
+$ReqFile = Join-Path $ScriptRoot 'requirements-tools.txt'
+if (Test-Path $ReqFile) {
+    $Packages = (Get-Content $ReqFile) -notmatch '^\s*#' -notmatch '^\s*$'
+} else {
+    $Packages = @(
+        'headroom-ai[proxy,mcp,code]',
+        'token-savior-recall',
+        'graphifyy'
+    )
+}
 $CavemanRepo = 'https://github.com/JuliusBrussee/caveman.git'
 
 # --- output helpers ---------------------------------------------------------

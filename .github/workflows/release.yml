@@ -1,0 +1,87 @@
+name: Build standalone release
+
+# Runs automatically when you publish a GitHub release, or manually via
+# Actions → Run workflow. The output is a zip that contains the full pre-built
+# venv (headroom, token-savior, graphify already installed) plus every script
+# and the pre-built React bundle, so the recipient needs no Python, no pip, and
+# no internet access after extracting.
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      attach_to_release:
+        description: 'Tag of an existing release to attach the zip to (leave blank to only upload artifact)'
+        required: false
+        default: ''
+
+jobs:
+  build-standalone:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build tool venv
+        shell: pwsh
+        run: |
+          python -m venv bundle\venv
+          bundle\venv\Scripts\python -m pip install --quiet --upgrade pip
+          bundle\venv\Scripts\pip install --quiet headroom-ai[proxy,mcp,code] token-savior-recall graphifyy
+          Write-Host "Installed packages:"
+          bundle\venv\Scripts\pip list --format=columns
+
+      - name: Assemble standalone bundle
+        shell: pwsh
+        run: |
+          $out = "tokenstack-standalone"
+          New-Item -ItemType Directory $out | Out-Null
+
+          # scripts, docs, gitignore
+          Copy-Item install.ps1, token-stack-web.ps1, token-stack-gui.ps1,
+                    bootstrap.ps1, README.md, .gitignore,
+                    requirements-tools.txt "$out\" -ErrorAction SilentlyContinue
+
+          # metrics harness (payload scripts copied into projects by install.ps1)
+          Copy-Item payload "$out\payload" -Recurse
+
+          # web panel: FastAPI backend + pre-built React bundle
+          # node_modules excluded by web/.gitignore so robocopy sees only what matters
+          robocopy web "$out\web" /E /XD __pycache__ /NFL /NDL /NJH /NJS
+          if ($LASTEXITCODE -ge 8) { throw "robocopy failed ($LASTEXITCODE)" }
+
+          # pre-built venv: the heavy part (~300-500 MB uncompressed)
+          Write-Host "Copying venv (this takes a moment)..."
+          robocopy bundle\venv "$out\venv" /E /NFL /NDL /NJH /NJS
+          if ($LASTEXITCODE -ge 8) { throw "robocopy venv failed ($LASTEXITCODE)" }
+
+          # zip
+          Write-Host "Compressing..."
+          Compress-Archive "$out\*" tokenstack-standalone.zip
+          $mb = [math]::Round((Get-Item tokenstack-standalone.zip).Length / 1MB, 1)
+          Write-Host "Bundle: tokenstack-standalone.zip ($mb MB)"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tokenstack-standalone
+          path: tokenstack-standalone.zip
+          retention-days: 30
+
+      - name: Attach zip to GitHub release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: tokenstack-standalone.zip
+
+      - name: Attach zip to existing release (manual dispatch)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.attach_to_release != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.attach_to_release }}
+          files: tokenstack-standalone.zip
