@@ -189,11 +189,21 @@ jobs:
             2. Extract anywhere
             3. Run:
                ```powershell
-               .\bootstrap.ps1 -ProjectPath C:\code\my-app
+               powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -ProjectPath C:\code\my-app
                ```
 
-            The zip contains a pre-built venv with headroom, token-savior, and
-            graphify already installed. No pip, no internet, no Python on PATH needed.
+            The zip carries a pre-built venv with headroom, token-savior, and
+            graphify installed, plus the matching Python interpreter. No pip, no
+            internet, no Python on PATH needed.
+
+            `-ExecutionPolicy Bypass` is needed because the scripts are unsigned
+            and a zip download is marked internet-sourced. It applies to that one
+            process and changes nothing on your machine.
+
+            **Extract, then run in place.** A Python venv records absolute paths,
+            so `bootstrap.ps1` binds the bundle to wherever you extracted it on
+            first launch. If you later move the folder, run `.\repair.ps1` once —
+            it is idempotent and takes a second. See `DEPLOYMENT.md` in the zip.
           files: tokenstack-standalone.zip
           generate_release_notes: false
 
