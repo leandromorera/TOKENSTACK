@@ -49,9 +49,24 @@ jobs:
 
           # scripts, docs, root files — one per line to avoid multiline parse issues
           foreach ($f in @('install.ps1','token-stack-web.ps1','token-stack-gui.ps1',
-                           'bootstrap.ps1','README.md','.gitignore','requirements-tools.txt')) {
+                           'bootstrap.ps1','repair.ps1','README.md','DEPLOYMENT.md',
+                           '.gitignore','requirements-tools.txt')) {
             if (Test-Path $f) { Copy-Item $f "$out\" }
           }
+
+          # Base interpreter. A venv is not self-contained: it records the
+          # absolute path of the Python it was built against and loads the
+          # standard library from there. Without shipping that interpreter the
+          # bundle cannot run unless the recipient happens to have the identical
+          # minor version installed — which contradicts the whole premise of a
+          # no-Python-required bundle. repair.ps1 repoints pyvenv.cfg here on
+          # first run.
+          $baseHome = Split-Path -Parent (Get-Command python).Source
+          Write-Host "Copying base interpreter from $baseHome ..."
+          robocopy $baseHome "$out\python" /E /XD __pycache__ /NFL /NDL /NJH /NJS
+          if ($LASTEXITCODE -ge 8) { throw "robocopy python failed ($LASTEXITCODE)" }
+          $global:LASTEXITCODE = 0
+          if (-not (Test-Path "$out\python\python.exe")) { throw "base interpreter not copied" }
 
           # metrics harness
           Copy-Item payload "$out\payload" -Recurse
@@ -72,6 +87,86 @@ jobs:
           Compress-Archive -Path "$out\*" -DestinationPath tokenstack-standalone.zip
           $mb = [math]::Round((Get-Item tokenstack-standalone.zip).Length / 1MB, 1)
           Write-Host "Bundle: tokenstack-standalone.zip ($mb MB)"
+
+      # Extract to a DIFFERENT path than the build tree and run the bundle from
+      # there. Testing the build tree in place would pass even when nothing is
+      # relocatable, which is exactly how three release-blocking defects shipped:
+      # a venv bound to the CI interpreter path, console-script shims bound to
+      # the CI venv path, and a launcher that discarded every argument.
+      - name: Smoke test the extracted bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Several assertions below deliberately invoke scripts that exit
+          # non-zero. PowerShell 7 turns a native command's non-zero exit into a
+          # terminating error under Stop, which would abort the step before the
+          # assertion could read the output. Exit codes are checked explicitly.
+          if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+          $extract = Join-Path $env:RUNNER_TEMP 'smoke\tokenstack'
+          $project = Join-Path $env:RUNNER_TEMP 'smoke\project'
+          New-Item -ItemType Directory -Force -Path $extract, $project | Out-Null
+          Expand-Archive -Path tokenstack-standalone.zip -DestinationPath $extract
+          git init --quiet $project
+
+          Write-Host '--- repair'
+          & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $extract 'repair.ps1')
+          if ($LASTEXITCODE -ne 0) { throw "repair.ps1 exited $LASTEXITCODE" }
+
+          Write-Host '--- venv runs without any Python on PATH'
+          $venvPy = Join-Path $extract 'venv\Scripts\python.exe'
+          & $venvPy -c 'import fastapi, uvicorn, graphify; print(''imports ok'')'
+          if ($LASTEXITCODE -ne 0) { throw "bundled venv cannot import its dependencies" }
+
+          Write-Host '--- console-script shims run'
+          foreach ($exe in @('headroom.exe','token-savior.exe','graphify.exe')) {
+            $p = Join-Path $extract "venv\Scripts\$exe"
+            $null = & $p --version
+            if ($LASTEXITCODE -ne 0) { throw "$exe exits $LASTEXITCODE - shim not repaired" }
+            Write-Host "    $exe ok"
+          }
+
+          Write-Host '--- installer reaches the project (dry run)'
+          $installLog = Join-Path $env:RUNNER_TEMP 'smoke\install.log'
+          powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $extract 'install.ps1') `
+                   -ProjectPath $project -ToolsHome $extract -DryRun *> $installLog
+          $installExit = $LASTEXITCODE
+          $installOut = Get-Content $installLog -Raw
+          Write-Host $installOut
+          if ($installExit -ne 0) { throw "install.ps1 -DryRun exited $installExit" }
+          # The argument-splat defect surfaced as the project path never arriving.
+          if (-not ($installOut -match [regex]::Escape($project))) {
+            throw "install.ps1 did not receive -ProjectPath - argument passing is broken"
+          }
+          # A dry run must not touch the project.
+          foreach ($w in @('.mcp.json', '.claude', 'tools')) {
+            if (Test-Path (Join-Path $project $w)) { throw "-DryRun wrote $w into the project" }
+          }
+
+          Write-Host '--- bootstrap forwards its arguments to the panel'
+          # A deliberately absent path: the panel must reject THAT path by name,
+          # which proves the value travelled all the way through. Launching a real
+          # panel here would block the job, since it serves until interrupted.
+          # When the arguments are dropped instead, the failure is a bind error on
+          # an empty string and the path never appears.
+          # Redirect to a file rather than merging stderr into the pipeline with
+          # 2>&1: Windows PowerShell wraps each native stderr line in an
+          # ErrorRecord, which trips Stop even on a successful call.
+          $missing = Join-Path $env:RUNNER_TEMP 'smoke\definitely-not-here'
+          $log = Join-Path $env:RUNNER_TEMP 'smoke\bootstrap.log'
+          powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $extract 'bootstrap.ps1') `
+                   -ProjectPath $missing -NoBrowser *> $log
+          $out = Get-Content $log -Raw
+          Write-Host $out
+          if ($out -match 'Cannot bind argument to parameter') {
+            throw "bootstrap.ps1 is discarding its arguments"
+          }
+          if (-not ($out -match [regex]::Escape($missing))) {
+            throw "bootstrap.ps1 did not forward -ProjectPath to the panel"
+          }
+
+          Write-Host 'Smoke test passed.'
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

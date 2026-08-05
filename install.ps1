@@ -321,6 +321,31 @@ if (Test-Path $metricsFile) {
 # ===========================================================================
 Write-Step 'MCP servers (.mcp.json)'
 
+# Every entry below is an absolute path to a console-script .exe in the venv.
+# Those launchers embed the absolute path of the venv they were BUILT in, so in a
+# relocated bundle they exit 1 with no output. Claude Code would then report
+# three dead MCP servers every session with nothing to explain it, and the
+# installer would look like it had succeeded. Verify one now, and repair the
+# whole set rather than writing paths that cannot run.
+$probeExe = Join-Path $VenvScripts 'headroom.exe'
+if (-not $DryRun -and (Test-Path $probeExe)) {
+    $probe = Invoke-Native $probeExe @('--version')
+    if ($probe.ExitCode -ne 0) {
+        $repair = Join-Path $ScriptRoot 'repair.ps1'
+        if (Test-Path $repair) {
+            Write-Warn 'console-script shims point at another path - repairing the bundle'
+            & $repair -Quiet
+            $probe = Invoke-Native $probeExe @('--version')
+        }
+        if ($probe.ExitCode -ne 0) {
+            Write-Warn "headroom.exe still exits $($probe.ExitCode)."
+            Write-Warn 'the MCP entries below will be written but will not start. Run repair.ps1 -Force.'
+        } else {
+            Write-Ok 'console-script shims repaired'
+        }
+    }
+}
+
 $mcp = Read-JsonMap $McpFile
 if (-not $mcp.mcpServers) { $mcp.mcpServers = @{} }
 

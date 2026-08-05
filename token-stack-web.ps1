@@ -85,6 +85,33 @@ if (-not (Test-Path $Dist)) {
     exit 1
 }
 
+# Probe the port before uvicorn binds it. Otherwise a panel left running from an
+# earlier session produces two misleading symptoms at once: this process prints a
+# URL carrying a freshly minted session token and then dies on the bind conflict,
+# so the browser reaches the OLD process and reports "Bad or missing session
+# token" — which reads like an auth bug rather than a port conflict.
+$held = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+if ($held.Count -gt 0) {
+    Write-Host ''
+    Write-Host "  Port $Port is already in use." -ForegroundColor Yellow
+    foreach ($conn in $held) {
+        $owner = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+        if ($owner) {
+            Write-Host "    held by PID $($owner.Id) ($($owner.ProcessName), started $($owner.StartTime))" -ForegroundColor DarkYellow
+        } else {
+            Write-Host "    held by PID $($conn.OwningProcess)" -ForegroundColor DarkYellow
+        }
+    }
+    Write-Host ''
+    Write-Host '  If that is an older panel, it has its own session token, so a URL printed' -ForegroundColor Yellow
+    Write-Host '  by this run would be rejected by it. Either reuse that panel, stop it:' -ForegroundColor Yellow
+    Write-Host "    Stop-Process -Id $($held[0].OwningProcess) -Force" -ForegroundColor White
+    Write-Host '  or start this one elsewhere:' -ForegroundColor Yellow
+    Write-Host "    -Port $($Port + 2)" -ForegroundColor White
+    Write-Host ''
+    exit 1
+}
+
 $serverArgs = @($Server, '--port', "$Port", '--project', $ProjectPath)
 if ($NoBrowser) { $serverArgs += '--no-browser' }
 

@@ -165,6 +165,36 @@ def port_open(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+# Cached because compute_state runs on every poll of /api/state and this spawns a
+# process. The answer only changes when repair.ps1 runs, which restarts nothing —
+# the cache is keyed on the shim's mtime, which the byte-patch updates.
+_EXE_RUNS: dict[tuple[str, float], bool] = {}
+
+
+def exe_runs(exe: Path) -> bool:
+    """Whether a console-script launcher actually executes.
+
+    A Windows console script is a launcher .exe with the target interpreter path
+    embedded as a #! line. A venv copied away from where it was built keeps shims
+    pointing at the original path, and the launcher then exits 1 having written
+    nothing at all - no traceback, no message. Callers that only check .exists()
+    report success for tools that cannot start.
+    """
+    try:
+        key = (str(exe), exe.stat().st_mtime)
+    except OSError:
+        return False
+    if key in _EXE_RUNS:
+        return _EXE_RUNS[key]
+    try:
+        proc = subprocess.run([str(exe), "--version"], capture_output=True, timeout=20)
+        ok = proc.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        ok = False
+    _EXE_RUNS[key] = ok
+    return ok
+
+
 def compute_state(project: Path, tools: Path, port: int) -> list[dict]:
     rows: list[dict] = []
 
@@ -182,12 +212,18 @@ def compute_state(project: Path, tools: Path, port: int) -> list[dict]:
     else:
         add("st-project", "Project", "not a git repo - measurement will not work", "warn")
 
-    # shared venv
+    # shared venv. Presence of a shim is not the same as a working shim: in a
+    # relocated bundle every console script is present and unrunnable, so report
+    # what actually executes rather than what exists.
     scripts = tools / "venv" / "Scripts"
     if (scripts / "python.exe").exists():
         found = [n for n in ("headroom", "token-savior", "graphify") if (scripts / f"{n}.exe").exists()]
-        state = "ok" if len(found) == 3 else ("warn" if found else "bad")
-        add("st-venv", "Tool venv", f"{len(found)}/3 tools: {', '.join(found) or 'none'}", state)
+        if len(found) == 3 and not exe_runs(scripts / "headroom.exe"):
+            add("st-venv", "Tool venv",
+                "3/3 tools present but not runnable - run repair.ps1 in the bundle", "bad")
+        else:
+            state = "ok" if len(found) == 3 else ("warn" if found else "bad")
+            add("st-venv", "Tool venv", f"{len(found)}/3 tools: {', '.join(found) or 'none'}", state)
     else:
         add("st-venv", "Tool venv", "not built yet", "off")
 
@@ -312,6 +348,17 @@ def api_run(req: RunReq, request: Request, x_token: str | None = Header(None)):
         headroom = tools / "venv" / "Scripts" / "headroom.exe"
         if not headroom.exists():
             raise HTTPException(400, "headroom.exe not found. Install first.")
+        # The shim exists but may still be unrunnable: console-script launchers
+        # embed the absolute path of the venv they were built in, so a relocated
+        # bundle's shims exit 1 with no output. Popen would succeed, the console
+        # window would flash and vanish, and this endpoint would report success
+        # for a proxy that never started. Probe before promising anything.
+        if not exe_runs(headroom):
+            raise HTTPException(
+                400,
+                "headroom.exe exists but does not run - the bundle's console-script "
+                "shims point at another path. Run repair.ps1 in the bundle directory.",
+            )
         if port_open(req.port):
             return {"started": False, "message": f"Already listening on :{req.port}."}
         # Its own console: the proxy is long-lived and you need somewhere to

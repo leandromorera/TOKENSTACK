@@ -8,11 +8,29 @@ Download `tokenstack-standalone.zip` from the
 [Releases page](../../releases/latest), extract it anywhere, and run:
 
 ```powershell
-.\bootstrap.ps1 -ProjectPath C:\code\my-app
+powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -ProjectPath C:\code\my-app
 ```
 
-The zip contains a pre-built venv with every tool already installed — no pip,
-no internet, no Python on PATH needed.
+The zip carries a pre-built venv with every tool installed, plus the matching
+Python interpreter — no pip, no internet, no Python on PATH needed.
+
+The `-ExecutionPolicy Bypass` prefix is there because the bundle's scripts are
+unsigned and a zip download is marked as internet-sourced. It applies to that one
+process only and changes nothing on the machine. `.\bootstrap.ps1` on its own
+works if your policy already allows unsigned local scripts.
+
+**Extract first, then run in place.** A Python venv records absolute paths, so
+`bootstrap.ps1` runs `repair.ps1` on first launch to bind the bundle to wherever
+you extracted it. If you later move or copy the extracted folder, run it again:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\repair.ps1
+```
+
+It is idempotent and takes a second. Skipping it after a move leaves the venv
+unable to start and every tool shim silently exiting — see
+[DEPLOYMENT.md](DEPLOYMENT.md) for why, and for the full list of what the repair
+step rewrites.
 
 ### Option B — git clone (Python 3.10+ and internet required)
 
@@ -87,6 +105,14 @@ tools/token-metrics/collect.py   measurement collector
 tools/token-metrics/dashboard.py dashboard renderer
 .gitignore                       machine-local entries appended
 ```
+
+`.claude/settings.local.json` makes Claude Code in that project **require** the
+Headroom proxy on `:8787`. If the proxy is not running, Claude Code fails there.
+Delete the file to opt out. `install.ps1 -DryRun` shows everything it would write
+without touching disk.
+
+Measurement needs the target to be a **git repository** — `collect.py` scopes its
+corpus with `git ls-files` rather than walking the filesystem.
 
 ## How the tools link to a project and to Claude
 
