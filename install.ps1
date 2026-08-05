@@ -438,6 +438,29 @@ if (-not $isGit) {
 }
 
 # ===========================================================================
+# 7. PROJECT SCOPE — point graphify at the shared venv
+# ===========================================================================
+Write-Step 'graphify interpreter'
+
+# The /graphify skill resolves its interpreter by probing uv, then pipx, then
+# whatever `python` is on PATH, and pip-installs graphifyy when none of them can
+# import it. It knows nothing about this venv, so on a machine whose PATH Python
+# lacks graphify it silently builds a second copy — a few hundred MB of duplicate
+# download for a tool already sitting in the shared venv. Writing the marker it
+# reads first makes it reuse ours. Both files are gitignored as machine-local.
+if (Test-Path $VenvPython) {
+    $graphifyOut = Join-Path $ProjectPath 'graphify-out'
+    Invoke-Action 'pre-seed graphify-out\.graphify_python' {
+        New-Item -ItemType Directory -Force -Path $graphifyOut | Out-Null
+        # -NoNewline: the skill reads these files whole and uses them as paths.
+        [System.IO.File]::WriteAllText((Join-Path $graphifyOut '.graphify_python'), $VenvPython)
+        [System.IO.File]::WriteAllText((Join-Path $graphifyOut '.graphify_root'),   $ProjectPath)
+    }
+} else {
+    Write-Info 'shared venv not built yet - skipping'
+}
+
+# ===========================================================================
 # Next steps
 # ===========================================================================
 Write-Host ''
@@ -446,13 +469,18 @@ Write-Host ''
 Write-Host '  1. Start the proxy (leave it running):' -ForegroundColor White
 Write-Host "       & '$(Join-Path $VenvScripts 'headroom.exe')' proxy --port $Port"
 Write-Host ''
+# Name the shared venv's interpreter rather than a bare `python`. A standalone
+# bundle is meant to work with no Python on PATH, so `python collect.py` is a
+# command that cannot run on the machine the bundle was built for.
 Write-Host '  2. Take a baseline measurement:' -ForegroundColor White
-Write-Host "       python tools\token-metrics\collect.py --label baseline"
+Write-Host "       & '$VenvPython' '$(Join-Path $MetricsDir 'collect.py')' --label baseline"
 Write-Host ''
 Write-Host '  3. Build the knowledge graph (optional, needs an LLM session):' -ForegroundColor White
+Write-Host '       run /graphify inside Claude Code in this project, or headless:'
 Write-Host "       & '$(Join-Path $VenvScripts 'graphify.exe')' ."
+Write-Host '       then re-run this installer to link the graph as an MCP server.'
 Write-Host ''
 Write-Host '  4. After some real work, measure again and render:' -ForegroundColor White
-Write-Host "       python tools\token-metrics\collect.py --label after"
-Write-Host "       python tools\token-metrics\dashboard.py --open"
+Write-Host "       & '$VenvPython' '$(Join-Path $MetricsDir 'collect.py')' --label after"
+Write-Host "       & '$VenvPython' '$(Join-Path $MetricsDir 'dashboard.py')' --open"
 Write-Host ''

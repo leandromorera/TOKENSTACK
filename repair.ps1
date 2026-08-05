@@ -199,9 +199,23 @@ for exe in sorted(scripts.glob('*.exe')):
         failed.append('%s: %s' % (exe.name, e))
 
 print('shims patched=%d already_ok=%d' % (patched, already))
+
+# Verify by re-reading rather than trusting the write. This is the only
+# CLI-independent proof that the rewrite took: asserting through a tool's
+# --version couples the check to that tool's flags, which change between
+# releases, and a launcher that cannot start is indistinguishable from a CLI
+# that rejected the flag by exit code alone.
+stale = []
+for exe in sorted(scripts.glob('*.exe')):
+    data = exe.read_bytes()
+    m = pattern.search(data)
+    if m and m.group(0) != want:
+        stale.append('%s -> %s' % (exe.name, m.group(0)[2:].decode('utf-8', 'replace')))
+for s in stale:
+    print('STALE ' + s)
 for f in failed:
     print('FAILED ' + f)
-sys.exit(1 if failed else 0)
+sys.exit(1 if (failed or stale) else 0)
 '@
 
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "tokenstack-shims-$PID.py"
@@ -212,10 +226,11 @@ try {
     $out = & $VenvPython @shimArgs
     $shimExit = $LASTEXITCODE
     foreach ($line in $out) {
-        if ($line -like 'FAILED*') { Write-Warn $line } else { Write-Did $line }
+        if ($line -like 'FAILED*' -or $line -like 'STALE*') { Write-Warn $line } else { Write-Did $line }
     }
     if ($shimExit -ne 0) {
-        Write-Warn 'some shims could not be rewritten - close any running proxy or MCP server and re-run'
+        Write-Warn 'some shims still point elsewhere - close any running proxy or MCP server and re-run'
+        exit 1
     }
 } finally {
     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
@@ -237,15 +252,32 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# A working shim proves step 2 end to end. headroom.exe is the one the web
-# panel's proxy button invokes by absolute path, so it is the one worth probing.
+# Prove a launcher actually starts. headroom.exe is the one the web panel's proxy
+# button invokes by absolute path, so it is the one worth probing.
+#
+# Exit code alone cannot decide this: a CLI that rejects --version and a launcher
+# that cannot find its interpreter both exit non-zero. The distinguishing signal
+# is output. A broken launcher writes NOTHING at all - no message, no traceback -
+# whereas any Python that started produces version text, a usage block, or a
+# traceback. So: any output means the shim works, whatever the exit code.
 $probeExe = Join-Path $VenvScripts 'headroom.exe'
 if (Test-Path $probeExe) {
-    $null = & $probeExe --version
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warn "headroom.exe exits $LASTEXITCODE - console scripts still broken."
-        Write-Warn 'the proxy button and .mcp.json entries will fail silently. Try -Force.'
-        exit 1
+    $probeOut = Join-Path ([System.IO.Path]::GetTempPath()) "tokenstack-probe-$PID.txt"
+    $probeErr = Join-Path ([System.IO.Path]::GetTempPath()) "tokenstack-probe-$PID.err"
+    try {
+        $proc = Start-Process -FilePath $probeExe -ArgumentList '--version' -Wait -PassThru -NoNewWindow `
+                    -RedirectStandardOutput $probeOut -RedirectStandardError $probeErr
+        $said = ''
+        foreach ($f in @($probeOut, $probeErr)) {
+            if (Test-Path $f) { $said += (Get-Content $f -Raw) }
+        }
+        if ($proc.ExitCode -ne 0 -and [string]::IsNullOrWhiteSpace($said)) {
+            Write-Warn "headroom.exe exits $($proc.ExitCode) without output - its launcher cannot start."
+            Write-Warn 'the proxy button and .mcp.json entries would fail silently. Try -Force.'
+            exit 1
+        }
+    } finally {
+        Remove-Item $probeOut, $probeErr -Force -ErrorAction SilentlyContinue
     }
 }
 

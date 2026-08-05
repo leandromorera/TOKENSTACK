@@ -179,6 +179,12 @@ def exe_runs(exe: Path) -> bool:
     pointing at the original path, and the launcher then exits 1 having written
     nothing at all - no traceback, no message. Callers that only check .exists()
     report success for tools that cannot start.
+
+    Exit code alone cannot decide this, because a CLI that does not accept
+    --version also exits non-zero, and which flags a tool accepts changes between
+    releases. Output is the signal that separates them: a launcher that never
+    started its interpreter prints nothing, while any Python that ran prints
+    version text, a usage block, or a traceback.
     """
     try:
         key = (str(exe), exe.stat().st_mtime)
@@ -188,7 +194,7 @@ def exe_runs(exe: Path) -> bool:
         return _EXE_RUNS[key]
     try:
         proc = subprocess.run([str(exe), "--version"], capture_output=True, timeout=20)
-        ok = proc.returncode == 0
+        ok = proc.returncode == 0 or bool((proc.stdout + proc.stderr).strip())
     except (OSError, subprocess.SubprocessError):
         ok = False
     _EXE_RUNS[key] = ok

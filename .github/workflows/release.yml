@@ -104,6 +104,26 @@ jobs:
           if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
             $PSNativeCommandUseErrorActionPreference = $false
           }
+
+          # Capture a child script's output without routing its stderr through a
+          # PowerShell stream. Both `2>&1` and `*>` wrap each native stderr line
+          # in an ErrorRecord under Windows PowerShell, which trips Stop even when
+          # the call succeeded; Start-Process redirects at the OS level, so this
+          # behaves the same in 5.1 and 7. Returns exit code and combined output.
+          function Invoke-Script {
+            param([string[]] $ScriptArgs, [string] $LogName)
+            $so = Join-Path $env:RUNNER_TEMP "smoke\$LogName.out"
+            $se = Join-Path $env:RUNNER_TEMP "smoke\$LogName.err"
+            $p = Start-Process -FilePath 'powershell' -Wait -PassThru -NoNewWindow `
+                   -ArgumentList (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File') + $ScriptArgs) `
+                   -RedirectStandardOutput $so -RedirectStandardError $se
+            $text = ''
+            foreach ($f in @($so, $se)) {
+              if (Test-Path $f) { $text += (Get-Content $f -Raw) }
+            }
+            return @{ ExitCode = $p.ExitCode; Output = $text }
+          }
+
           $extract = Join-Path $env:RUNNER_TEMP 'smoke\tokenstack'
           $project = Join-Path $env:RUNNER_TEMP 'smoke\project'
           New-Item -ItemType Directory -Force -Path $extract, $project | Out-Null
@@ -111,32 +131,71 @@ jobs:
           git init --quiet $project
 
           Write-Host '--- repair'
-          & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $extract 'repair.ps1')
-          if ($LASTEXITCODE -ne 0) { throw "repair.ps1 exited $LASTEXITCODE" }
+          $r = Invoke-Script @((Join-Path $extract 'repair.ps1')) 'repair'
+          Write-Host $r.Output
+          if ($r.ExitCode -ne 0) { throw "repair.ps1 exited $($r.ExitCode)" }
 
           Write-Host '--- venv runs without any Python on PATH'
           $venvPy = Join-Path $extract 'venv\Scripts\python.exe'
           & $venvPy -c 'import fastapi, uvicorn, graphify; print(''imports ok'')'
           if ($LASTEXITCODE -ne 0) { throw "bundled venv cannot import its dependencies" }
 
-          Write-Host '--- console-script shims run'
-          foreach ($exe in @('headroom.exe','token-savior.exe','graphify.exe')) {
-            $p = Join-Path $extract "venv\Scripts\$exe"
-            $null = & $p --version
-            if ($LASTEXITCODE -ne 0) { throw "$exe exits $LASTEXITCODE - shim not repaired" }
-            Write-Host "    $exe ok"
+          Write-Host '--- every console-script shim points at this extract'
+          # Assert on the embedded path rather than on any tool's --version. The
+          # packages are installed unpinned, so their CLI flags are not ours to
+          # depend on, and a launcher that cannot start is indistinguishable by
+          # exit code from a CLI that rejected a flag. repair.ps1 makes the same
+          # check; this verifies it from outside.
+          $shimCheck = @'
+          import re, sys
+          from pathlib import Path
+          scripts = Path(sys.argv[1])
+          want = ('#!' + str(scripts / 'python.exe')).encode('utf-8')
+          pattern = re.compile(rb'#![^\r\n\x00]{0,300}?[\\/]python(?:w)?\.exe')
+          ok, stale = 0, []
+          for exe in sorted(scripts.glob('*.exe')):
+              m = pattern.search(exe.read_bytes())
+              if not m:
+                  continue
+              if m.group(0) == want:
+                  ok += 1
+              else:
+                  stale.append('%s -> %s' % (exe.name, m.group(0)[2:].decode('utf-8', 'replace')))
+          print('shims bound to this extract: %d' % ok)
+          for s in stale:
+              print('STALE ' + s)
+          sys.exit(1 if (stale or ok == 0) else 0)
+          '@
+          $shimScript = Join-Path $env:RUNNER_TEMP 'smoke\check_shims.py'
+          # Strip the YAML block indentation Python would reject.
+          ($shimCheck -split "`n" | ForEach-Object { $_ -replace '^          ', '' }) -join "`n" |
+            Set-Content -Path $shimScript -Encoding utf8
+          & $venvPy $shimScript (Join-Path $extract 'venv\Scripts')
+          if ($LASTEXITCODE -ne 0) { throw "console-script shims are not bound to this extract" }
+
+          Write-Host '--- a launcher actually starts'
+          # graphify is ours to depend on: `graphify --version` is a documented
+          # flag of the pinned entry point. A shim whose interpreter is missing
+          # prints nothing at all, so any output proves the launcher ran.
+          $g = Join-Path $extract 'venv\Scripts\graphify.exe'
+          $gOut = Join-Path $env:RUNNER_TEMP 'smoke\graphify.out'
+          $gErr = Join-Path $env:RUNNER_TEMP 'smoke\graphify.err'
+          $gp = Start-Process -FilePath $g -ArgumentList '--version' -Wait -PassThru -NoNewWindow `
+                  -RedirectStandardOutput $gOut -RedirectStandardError $gErr
+          $gSaid = ''
+          foreach ($f in @($gOut, $gErr)) { if (Test-Path $f) { $gSaid += (Get-Content $f -Raw) } }
+          Write-Host "    graphify.exe exit=$($gp.ExitCode) said: $($gSaid.Trim())"
+          if ($gp.ExitCode -ne 0 -and [string]::IsNullOrWhiteSpace($gSaid)) {
+            throw "graphify.exe produced no output - its launcher never started"
           }
 
           Write-Host '--- installer reaches the project (dry run)'
-          $installLog = Join-Path $env:RUNNER_TEMP 'smoke\install.log'
-          powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $extract 'install.ps1') `
-                   -ProjectPath $project -ToolsHome $extract -DryRun *> $installLog
-          $installExit = $LASTEXITCODE
-          $installOut = Get-Content $installLog -Raw
-          Write-Host $installOut
-          if ($installExit -ne 0) { throw "install.ps1 -DryRun exited $installExit" }
+          $i = Invoke-Script @((Join-Path $extract 'install.ps1'), '-ProjectPath', $project,
+                               '-ToolsHome', $extract, '-DryRun') 'install'
+          Write-Host $i.Output
+          if ($i.ExitCode -ne 0) { throw "install.ps1 -DryRun exited $($i.ExitCode)" }
           # The argument-splat defect surfaced as the project path never arriving.
-          if (-not ($installOut -match [regex]::Escape($project))) {
+          if (-not ($i.Output -match [regex]::Escape($project))) {
             throw "install.ps1 did not receive -ProjectPath - argument passing is broken"
           }
           # A dry run must not touch the project.
@@ -150,19 +209,14 @@ jobs:
           # panel here would block the job, since it serves until interrupted.
           # When the arguments are dropped instead, the failure is a bind error on
           # an empty string and the path never appears.
-          # Redirect to a file rather than merging stderr into the pipeline with
-          # 2>&1: Windows PowerShell wraps each native stderr line in an
-          # ErrorRecord, which trips Stop even on a successful call.
           $missing = Join-Path $env:RUNNER_TEMP 'smoke\definitely-not-here'
-          $log = Join-Path $env:RUNNER_TEMP 'smoke\bootstrap.log'
-          powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $extract 'bootstrap.ps1') `
-                   -ProjectPath $missing -NoBrowser *> $log
-          $out = Get-Content $log -Raw
-          Write-Host $out
-          if ($out -match 'Cannot bind argument to parameter') {
+          $b = Invoke-Script @((Join-Path $extract 'bootstrap.ps1'), '-ProjectPath', $missing,
+                               '-NoBrowser') 'bootstrap'
+          Write-Host $b.Output
+          if ($b.Output -match 'Cannot bind argument to parameter') {
             throw "bootstrap.ps1 is discarding its arguments"
           }
-          if (-not ($out -match [regex]::Escape($missing))) {
+          if (-not ($b.Output -match [regex]::Escape($missing))) {
             throw "bootstrap.ps1 did not forward -ProjectPath to the panel"
           }
 
