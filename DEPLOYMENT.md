@@ -131,3 +131,9 @@ interpreter to prevent that; `install.ps1` already gitignores that file as
 machine-local. Two further notes: the skill and the packaged CLI are versioned
 independently and warn on skew, and `graph.json` is NetworkX node-link JSON whose
 edge list is `links`, not `edges`.
+
+The skill itself is not installed by pip. `graphify install --platform claude`
+copies it into `~/.claude/skills/graphify/`, and until that runs there is no
+`/graphify` command for the closing instructions to refer to. `install.ps1` runs
+it unconditionally, which doubles as the fix for the version skew above — a
+0.8.x skill sitting next to a 0.9.x package prints a warning on every CLI call.

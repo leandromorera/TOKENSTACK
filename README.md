@@ -132,6 +132,12 @@ So caveman and the `/graphify` skill need no per-project linking at all — they
 are user-scoped and already apply everywhere. Only the MCP servers and the proxy
 URL are written into a repo, which is exactly what `install.ps1` does.
 
+The skill is a separate artifact from the `graphifyy` package: pip-installing the
+package gives you the `graphify` CLI, but `~/.claude/skills/graphify/` — the thing
+that makes `/graphify` a command Claude Code recognises — only appears once
+`graphify install --platform claude` has run. The installer runs it for you on
+every pass, which also refreshes a skill copy left behind by an older release.
+
 **graphify is linked only after the graph is built.** An MCP server pointing at a
 missing `graph.json` makes Claude Code report a failed server on every session,
 so the installer wires it only when `graphify-out/graph.json` exists. Build the

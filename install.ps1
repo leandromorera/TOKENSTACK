@@ -438,8 +438,32 @@ if (-not $isGit) {
 }
 
 # ===========================================================================
-# 7. PROJECT SCOPE — point graphify at the shared venv
+# 7. PROJECT SCOPE — graphify skill + interpreter
 # ===========================================================================
+Write-Step 'graphify skill'
+
+# pip-installing graphifyy only puts the CLI in the venv. The `/graphify` slash
+# command is a separate artifact: a skill directory under ~/.claude/skills that
+# the package ships and copies into place on demand. Without this step the
+# closing "run /graphify" instruction below names a command that does not exist
+# on a fresh machine. `install` is also the documented way to refresh a skill
+# left behind by an older graphifyy, so run it every time, not just when the
+# directory is missing.
+$graphifyExe = Join-Path $VenvScripts 'graphify.exe'
+if (Test-Path $graphifyExe) {
+    Invoke-Action 'install/update the /graphify skill for Claude Code' {
+        $r = Invoke-Native $graphifyExe @('install', '--platform', 'claude')
+        if ($r.ExitCode -eq 0) {
+            Write-Ok '/graphify available in Claude Code'
+        } else {
+            Write-Warn "graphify install exited $($r.ExitCode) - /graphify may not exist."
+            Write-Warn "Run manually: & '$graphifyExe' install --platform claude"
+        }
+    }
+} else {
+    Write-Info 'graphify.exe not in the venv yet - skipping'
+}
+
 Write-Step 'graphify interpreter'
 
 # The /graphify skill resolves its interpreter by probing uv, then pipx, then
