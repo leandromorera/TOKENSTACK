@@ -275,10 +275,26 @@ if (-not (Test-Path $VenvPython)) {
 if (-not $DryRun -and (Test-Path $VenvPython)) {
     $installed = Get-InstalledPackages $VenvPython
     foreach ($pkg in $Packages) {
-        $name = ($pkg -split '\[')[0]
-        if (-not $Upgrade -and $installed.ContainsKey($name.ToLower())) {
-            Write-Ok "$name $($installed[$name.ToLower()]) already installed"
+        # A requirement is name + optional extras + optional pin. Splitting on '['
+        # alone left the '==x.y.z' glued to the name, so a pinned package with no
+        # extras never matched the installed map and was reinstalled every run.
+        # The pin also has to be COMPARED, not just parsed: presence-only matching
+        # reports a venv sitting on the wrong version as "already installed" and
+        # silently leaves it there, which would make pinning decorative.
+        if ($pkg -match '^\s*([A-Za-z0-9._-]+)\s*(?:\[[^\]]*\])?\s*(?:==\s*([^\s;]+))?') {
+            $name = $Matches[1]
+            $want = $Matches[2]
+        } else {
+            $name = ($pkg -split '\[')[0]
+            $want = $null
+        }
+        $have = $installed[$name.ToLower()]
+        if (-not $Upgrade -and $have -and (-not $want -or $have -eq $want)) {
+            Write-Ok "$name $have already installed"
             continue
+        }
+        if ($have -and $want -and $have -ne $want) {
+            Write-Info "$name $have installed, pinned at $want - correcting"
         }
         Write-Info "installing $pkg ... (this can take a few minutes)"
         $pipArgs = @('-m', 'pip', 'install', '--quiet', '--disable-pip-version-check')

@@ -1,9 +1,16 @@
 # Tool packages installed into the shared venv (~/.token-tools/venv).
-# Pin these here so the GitHub Actions release build and manual installs
-# use the same package set. The extras are load-bearing:
+# install.ps1 reads this file, and the GitHub Actions release build installs
+# from it too, so the bundle a user downloads holds exactly these versions.
+#
+# The extras are load-bearing:
 #   headroom-ai[proxy]  -> uvicorn + fastapi (web panel backend)
 #   headroom-ai[mcp]    -> MCP server entry point
 #   headroom-ai[code]   -> Claude Code integration
-headroom-ai[proxy,mcp,code]
-token-savior-recall
-graphifyy
+#
+# Pinned deliberately. Unpinned, every install pulled whatever was newest that
+# day: the release smoke test validated one package set and a user installing a
+# week later got another, so "it built green" said nothing about what they ran.
+# Bumping a pin is a commit, which is the point — it gets tested before it ships.
+headroom-ai[proxy,mcp,code]==0.33.0
+token-savior-recall==4.21.0
+graphifyy==0.9.32

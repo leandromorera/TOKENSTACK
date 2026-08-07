@@ -100,6 +100,27 @@ passed was discarded. The bundle could not launch at all.
 
 ## Operational notes
 
+**Pinned tool versions.** `requirements-tools.txt` pins exact versions and is the
+single source both `install.ps1` and the release workflow install from. Unpinned,
+the release smoke test validated one package set while a user installing a week
+later resolved another, so a green build said nothing about what they ran. Bump a
+pin in a commit, let the smoke test run against it, then release — that ordering
+is the whole value of the pin. `install.ps1` compares the installed version to the
+pin and corrects a venv sitting on the wrong one; presence-only matching would
+have made the pin decorative on any machine that already had the package.
+
+**The smoke test installs for real.** A dry run cannot fail the way a user's
+install fails: it writes no `.mcp.json`, starts no MCP server, and never reaches
+the graphify skill step. After the dry-run assertions the workflow does a real
+`-SkipProxy` install, speaks the MCP `initialize` handshake to every server via
+`.github/scripts/mcp_probe.py` (the same exchange Claude Code performs on session
+start — a shim bound to a dead venv path passes every file-existence check and
+fails only here), builds a `--code-only` graph, re-runs the installer to confirm
+the second pass links graphify, and runs `collect.py`. Keep that probe a real
+file: embedding Python in a YAML block scalar makes two indentation strips have
+to agree, and when they do not it dies on an `IndentationError` unrelated to what
+is under test.
+
 **Port conflicts.** A panel left running from an earlier session produced two
 misleading symptoms at once: the new process printed a URL with a freshly minted
 session token and then died on the bind conflict, so the browser reached the old

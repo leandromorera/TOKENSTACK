@@ -37,7 +37,11 @@ jobs:
         run: |
           python -m venv bundle\venv
           bundle\venv\Scripts\python -m pip install --quiet --upgrade pip
-          bundle\venv\Scripts\pip install --quiet headroom-ai[proxy,mcp,code] token-savior-recall graphifyy
+          # Install from the same file install.ps1 reads. A second hard-coded list
+          # here meant the bundle and a from-source install could resolve to
+          # different versions, so a green smoke test proved nothing about what a
+          # user running install.ps1 actually got.
+          bundle\venv\Scripts\pip install --quiet -r requirements-tools.txt
           Write-Host "Installed packages:"
           bundle\venv\Scripts\pip list --format=columns
 
@@ -219,6 +223,67 @@ jobs:
           if (-not ($b.Output -match [regex]::Escape($missing))) {
             throw "bootstrap.ps1 did not forward -ProjectPath to the panel"
           }
+
+          # Everything above this line is a dry run. A dry run cannot fail the way
+          # a user's install fails: it writes no .mcp.json, starts no MCP server,
+          # and never reaches the graphify skill step. Do the real thing.
+          Write-Host '--- real install into the project'
+          # -SkipProxy: wiring ANTHROPIC_BASE_URL at a proxy nothing started would
+          # leave the project pointing at a dead port. The proxy has its own check.
+          $ri = Invoke-Script @((Join-Path $extract 'install.ps1'), '-ProjectPath', $project,
+                                '-ToolsHome', $extract, '-SkipProxy') 'real-install'
+          Write-Host $ri.Output
+          if ($ri.ExitCode -ne 0) { throw "install.ps1 exited $($ri.ExitCode)" }
+
+          Write-Host '--- .mcp.json holds the servers it claims to'
+          $mcpPath = Join-Path $project '.mcp.json'
+          if (-not (Test-Path $mcpPath)) { throw "install.ps1 wrote no .mcp.json" }
+          $mcp = Get-Content $mcpPath -Raw | ConvertFrom-Json
+          foreach ($want in @('headroom', 'token-savior')) {
+            if (-not $mcp.mcpServers.PSObject.Properties.Name.Contains($want)) {
+              throw "$want missing from .mcp.json"
+            }
+          }
+
+          Write-Host '--- the skill that /graphify needs is on disk'
+          # pip installs the CLI; the skill is a separate artifact the installer
+          # has to copy. Without it the closing instructions name a command that
+          # does not exist.
+          $skill = Join-Path $env:USERPROFILE '.claude\skills\graphify\SKILL.md'
+          if (-not (Test-Path $skill)) { throw "install.ps1 did not install the graphify skill" }
+
+          Write-Host '--- every MCP server answers initialize'
+          # The same handshake Claude Code performs on session start. A server that
+          # is wired but cannot start shows up there as a failed server, and no
+          # amount of file-existence checking catches it.
+          # A real file in the repo, not a here-string: embedding Python in a YAML
+          # block scalar means two independent indentation strips have to agree,
+          # and when they do not the script dies on an IndentationError that has
+          # nothing to do with what is being tested.
+          $probe = Join-Path $env:GITHUB_WORKSPACE '.github\scripts\mcp_probe.py'
+          & $venvPy $probe $mcpPath
+          if ($LASTEXITCODE -ne 0) { throw "an MCP server in .mcp.json does not start" }
+
+          Write-Host '--- headless graph build, then the second pass links it'
+          # --code-only is pure local AST: no API key, no network. This is the
+          # command the installer now tells the user to run, so run it.
+          & $g extract $project --code-only
+          $graphJson = Join-Path $project 'graphify-out\graph.json'
+          if (-not (Test-Path $graphJson)) { throw "graphify --code-only produced no graph.json" }
+          $ri2 = Invoke-Script @((Join-Path $extract 'install.ps1'), '-ProjectPath', $project,
+                                 '-ToolsHome', $extract, '-SkipProxy') 'relink'
+          Write-Host $ri2.Output
+          if ($ri2.ExitCode -ne 0) { throw "install.ps1 second pass exited $($ri2.ExitCode)" }
+          $mcp2 = Get-Content $mcpPath -Raw | ConvertFrom-Json
+          if (-not $mcp2.mcpServers.PSObject.Properties.Name.Contains('graphify')) {
+            throw "second pass did not link graphify as an MCP server"
+          }
+          & $venvPy $probe $mcpPath
+          if ($LASTEXITCODE -ne 0) { throw "graphify MCP server does not start against the built graph" }
+
+          Write-Host '--- the measurement step the installer prints actually runs'
+          & $venvPy (Join-Path $project 'tools\token-metrics\collect.py') --label smoke
+          if ($LASTEXITCODE -ne 0) { throw "collect.py exited $LASTEXITCODE" }
 
           Write-Host 'Smoke test passed.'
 
