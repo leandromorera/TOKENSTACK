@@ -499,10 +499,18 @@ Write-Host ''
 Write-Host '  2. Take a baseline measurement:' -ForegroundColor White
 Write-Host "       & '$VenvPython' '$(Join-Path $MetricsDir 'collect.py')' --label baseline"
 Write-Host ''
-Write-Host '  3. Build the knowledge graph (optional, needs an LLM session):' -ForegroundColor White
-Write-Host '       run /graphify inside Claude Code in this project, or headless:'
-Write-Host "       & '$(Join-Path $VenvScripts 'graphify.exe')' ."
-Write-Host '       then re-run this installer to link the graph as an MCP server.'
+# Lead with the headless command, not /graphify. Code is extracted by local AST
+# with no LLM at all, so `--code-only` builds a graph on any machine with no API
+# key, no session, and no network — which is what most projects here need. The
+# slash command runs the same pipeline but only from inside a session, and it
+# falls back to the host agent for docs and images. Naming the session-only path
+# first sent people looking for a command to type in a terminal.
+Write-Host '  3. Build the knowledge graph (optional):' -ForegroundColor White
+Write-Host "       & '$(Join-Path $VenvScripts 'graphify.exe')' '$ProjectPath' --code-only"
+Write-Host '       Local AST only - no API key, no LLM, no network. Drop --code-only'
+Write-Host '       to index docs and images too; that part does need an API key.'
+Write-Host '       Or run /graphify from inside Claude Code in this project.'
+Write-Host '       Then re-run this installer to link the graph as an MCP server.'
 Write-Host ''
 Write-Host '  4. After some real work, measure again and render:' -ForegroundColor White
 Write-Host "       & '$VenvPython' '$(Join-Path $MetricsDir 'collect.py')' --label after"

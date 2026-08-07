@@ -10,7 +10,9 @@ import { dirname, resolve } from 'node:path'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const source = resolve(here, '../src/annotations.json')
-const target = resolve(here, '../../../../../docs/token-stack-gui.html')
+// scripts -> app -> web -> repo root. Five levels landed on C:\docs and made
+// `npm run build` die with ENOENT before Vite ever ran.
+const target = resolve(here, '../../../docs/token-stack-gui.html')
 
 const START = '/* @generated-from annotations.json - do not edit by hand */'
 const END = '/* @end-generated */'

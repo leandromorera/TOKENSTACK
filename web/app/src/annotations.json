@@ -84,7 +84,7 @@
   },
   "graphify-btn": {
     "g": "Run and measure", "t": "Link graphify",
-    "d": "The second installer pass. graphify serves an existing graph, so the installer wires it only once graphify-out/graph.json is on disk. This button checks the graph is really there first, and tells you to run /graphify if it is not.",
+    "d": "The second installer pass. graphify serves an existing graph, so the installer wires it only once graphify-out/graph.json is on disk. This button checks the graph is really there first, and gives you the build command if it is not.",
     "c": ".\\install.ps1 -ProjectPath <p>",
     "n": "Wiring an MCP server at a missing graph.json makes Claude Code report a failed server on every session. That is why it is two passes and not one."
   },
@@ -144,7 +144,7 @@
     "g": "Current state", "s": 1, "t": "graphify",
     "d": "Whether graphify-out/graph.json exists, how big it is, and whether it is actually wired into .mcp.json.",
     "c": "graphify-out\\graph.json",
-    "n": "Amber means the graph is built but not linked \u2014 the second pass everyone forgets. Click Link graphify. Grey means no graph yet: run /graphify inside Claude Code first."
+    "n": "Amber means the graph is built but not linked \u2014 the second pass everyone forgets. Click Link graphify. Grey means no graph yet: build one with `graphify.exe <project> --code-only` (local AST, no API key), or /graphify from inside Claude Code."
   },
   "st-caveman": {
     "g": "Current state", "s": 1, "t": "caveman",

@@ -260,7 +260,7 @@ def compute_state(project: Path, tools: Path, port: int) -> list[dict]:
         else:
             add("st-graphify", "graphify", f"graph built ({mb} MB) - not linked", "warn")
     else:
-        add("st-graphify", "graphify", "no graph yet - run /graphify in the project", "off")
+        add("st-graphify", "graphify", "no graph yet - run graphify.exe <project> --code-only", "off")
 
     # caveman
     if (Path.home() / ".claude" / "plugins" / "marketplaces" / "caveman").exists():
@@ -340,7 +340,12 @@ def api_run(req: RunReq, request: Request, x_token: str | None = Header(None)):
         JOB.start(installer(extra), "Uninstall")
     elif req.action == "link-graphify":
         if not (project / "graphify-out" / "graph.json").exists():
-            raise HTTPException(400, "No graphify-out/graph.json yet. Run /graphify in the project first.")
+            raise HTTPException(
+                400,
+                "No graphify-out/graph.json yet. Build it first: "
+                f"graphify.exe \"{project}\" --code-only "
+                "(local AST, no API key). Or run /graphify inside Claude Code.",
+            )
         JOB.start(installer([]), "Link graphify (re-run installer)")
     elif req.action in ("measure", "dashboard"):
         py = metrics_python(tools)

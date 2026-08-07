@@ -320,7 +320,7 @@ function Update-Status {
             [void] $rows.Add((New-StatusRow 'graphify' "graph built ($mb MB) - not linked, click Link graphify" 'warn'))
         }
     } else {
-        [void] $rows.Add((New-StatusRow 'graphify' 'no graph yet - run /graphify in the project' 'off'))
+        [void] $rows.Add((New-StatusRow 'graphify' 'no graph yet - run graphify.exe <project> --code-only' 'off'))
     }
 
     # -- caveman ------------------------------------------------------------
@@ -499,7 +499,9 @@ $GraphifyBtn.Add_Click({
     $graph = Join-Path $ProjectBox.Text.Trim() 'graphify-out\graph.json'
     if (-not (Test-Path $graph)) {
         [void][Windows.MessageBox]::Show(
-            "No graphify-out\graph.json in this project yet.`n`nBuild it first by running /graphify inside Claude Code, then click this again.",
+            "No graphify-out\graph.json in this project yet.`n`nBuild it first, then click this again:`n`n" +
+            "  & '$(Join-Path $ToolsBox.Text.Trim() 'venv\Scripts\graphify.exe')' '$($ProjectBox.Text.Trim())' --code-only`n`n" +
+            "Local AST only - no API key needed. Or run /graphify inside Claude Code.",
             'Graph not built', 'OK', 'Information')
         return
     }

@@ -141,7 +141,16 @@ every pass, which also refreshes a skill copy left behind by an older release.
 **graphify is linked only after the graph is built.** An MCP server pointing at a
 missing `graph.json` makes Claude Code report a failed server on every session,
 so the installer wires it only when `graphify-out/graph.json` exists. Build the
-graph, then re-run the installer to link it. Once linked it exposes
+graph, then re-run the installer to link it:
+
+```powershell
+& "$HOME\.token-tools\venv\Scripts\graphify.exe" "C:\code\my-app" --code-only
+```
+
+`--code-only` indexes source with a local AST parser: no API key, no LLM call, no
+network. Drop it to index docs and images too — that part is the only step that
+needs a key. `/graphify` inside a Claude Code session runs the same pipeline and
+uses the session itself as the LLM. Once linked it exposes
 `query_graph`, `get_node`, `get_neighbors`, `get_community`, `god_nodes`,
 `graph_stats`, `shortest_path` and PR-triage tools — which is what turns the
 per-question saving into something Claude reaches for on its own, rather than
