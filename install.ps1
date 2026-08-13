@@ -126,7 +126,12 @@ function ConvertTo-Hashtable {
     if ($InputObject -is [System.Collections.IEnumerable] -and $InputObject -isnot [string]) {
         return @($InputObject | ForEach-Object { ConvertTo-Hashtable $_ })
     }
-    if ($InputObject -is [psobject] -and $InputObject.PSObject.Properties.Name) {
+    # Must be PSCustomObject specifically, NOT [psobject]: in 5.1 every value is
+    # -is [psobject], so testing that turned each string in a JSON array into
+    # @{ Length = n } (a string's only property), which silently rewrote
+    # "enabledMcpjsonServers": ["headroom",...] as [{"Length":8},...] and left
+    # Claude Code with no enabled MCP servers.
+    if ($InputObject -is [System.Management.Automation.PSCustomObject]) {
         $h = @{}
         foreach ($p in $InputObject.PSObject.Properties) {
             $h[$p.Name] = ConvertTo-Hashtable $p.Value
@@ -406,6 +411,21 @@ if ($SkipProxy) {
     $settings = Read-JsonMap $SettingsFile
     if (-not $settings.env) { $settings.env = @{} }
     $settings.env['ANTHROPIC_BASE_URL'] = "http://127.0.0.1:$Port"
+
+    # Earlier builds round-tripped this list through a converter that turned each
+    # server name into @{ Length = n }, leaving Claude Code with no enabled MCP
+    # servers and no visible error. Keep only real strings, then re-add the
+    # servers we just wrote, so a project installed with the broken version
+    # heals on the next run.
+    $enabled = @()
+    if ($settings.ContainsKey('enabledMcpjsonServers')) {
+        $enabled = @($settings['enabledMcpjsonServers'] | Where-Object { $_ -is [string] })
+    }
+    foreach ($name in $mcp.mcpServers.Keys) {
+        if ($enabled -notcontains $name) { $enabled += $name }
+    }
+    $settings['enabledMcpjsonServers'] = $enabled
+
     Write-JsonMap $SettingsFile $settings '.claude/settings.local.json'
     Write-Warn "Claude Code in this project now REQUIRES the proxy on :$Port."
     Write-Warn 'If the proxy is down, Claude Code fails. Delete that file to opt out.'

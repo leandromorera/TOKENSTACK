@@ -181,13 +181,24 @@ def measure_headroom() -> dict | None:
 
     The proxy is authoritative: it sees the actual request stream, whereas the
     CLI only summarises what the proxy already recorded.
+
+    Two clocks matter and they are not the same. `summary.*` counts only the
+    *current proxy process*, so it reads zero on every restart even though the
+    tool has saved millions of tokens; `persistent_savings.lifetime` is the
+    cumulative total Headroom keeps on disk in ~/.headroom/proxy_savings.json.
+    Record both, and treat lifetime as the headline - restarting a proxy is not
+    a loss of savings.
     """
     if not HEADROOM_BIN.exists():
         return None
 
     result: dict = {"installed": True, "binary": str(HEADROOM_BIN)}
     try:
-        with urllib.request.urlopen(f"{HEADROOM_PROXY}/stats", timeout=15) as resp:
+        # The first /stats call after a cold start can take ~20s: the proxy
+        # loads its savings history and polls subscription quota before
+        # answering. A short timeout here records "proxy not running" for a
+        # proxy that is merely still waking up.
+        with urllib.request.urlopen(f"{HEADROOM_PROXY}/stats", timeout=60) as resp:
             stats = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError) as exc:
         result["proxy_reachable"] = False
@@ -209,7 +220,37 @@ def measure_headroom() -> dict | None:
     result["cost_with_usd"] = cost.get("with_headroom_usd", 0.0)
     result["cost_saved_usd"] = cost.get("total_saved_usd", 0.0)
     result["mcp"] = summary.get("mcp", {})
+
+    persistent = stats.get("persistent_savings") or {}
+    lifetime = persistent.get("lifetime") or {}
+    result["lifetime_requests"] = lifetime.get("requests", 0)
+    result["lifetime_tokens_saved"] = lifetime.get("tokens_saved", 0)
+    result["lifetime_cache_read_tokens"] = lifetime.get("cache_read_tokens", 0)
+    result["lifetime_input_tokens"] = lifetime.get("total_input_tokens", 0)
+    result["lifetime_saved_usd"] = round(
+        (lifetime.get("compression_savings_usd", 0.0) or 0.0)
+        + (lifetime.get("cache_savings_usd", 0.0) or 0.0), 6)
+    # When the proxy last saw a real API request. If this stops advancing, the
+    # client is no longer routed through the proxy - which looks identical to
+    # "the tool stopped saving" unless the timestamp is on the record.
+    result["last_activity_at"] = (
+        (persistent.get("display_session") or {}).get("last_activity_at")
+        or (stats.get("display_session") or {}).get("last_activity_at")
+        # /stats blanks the display session after an hour idle and does not
+        # expose lifetime_metrics, so the last-traffic timestamp survives only
+        # in the savings file on disk. That timestamp is the whole diagnosis
+        # when the counters flatline, so it is worth the extra read.
+        or _savings_file_last_activity(persistent.get("storage_path")))
     return result
+
+
+def _savings_file_last_activity(storage_path: str | None) -> str | None:
+    path = Path(storage_path) if storage_path else Path.home() / ".headroom" / "proxy_savings.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return (data.get("lifetime_metrics") or {}).get("last_activity_at")
 
 
 def measure_token_savior() -> dict | None:

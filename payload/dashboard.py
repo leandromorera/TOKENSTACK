@@ -166,11 +166,65 @@ def savior_verdict(savior: dict) -> tuple[str, str, str]:
               "working, not a measured saving.")
 
 
+def headroom_verdict(hr: dict) -> tuple[str, str, str]:
+    """(status, headline, detail) for Headroom.
+
+    Headroom keeps two counters and confusing them makes a working tool look
+    broken: `tokens_saved_all_layers` covers the current proxy *process* and
+    resets to zero every restart, while `lifetime_tokens_saved` is the total on
+    disk. Lead with lifetime; report the process counter as "this session".
+
+    The failure this is built to expose: a proxy that is up and answering but
+    has seen no API traffic since it was restarted. That is not a saving of
+    zero - it means the client is not routed through it.
+    """
+    if not hr:
+        return ("inactive", "Not installed", "No headroom binary in the tool venv.")
+    if not hr.get("proxy_reachable"):
+        err = hr.get("proxy_error", "")
+        return ("inactive", "Proxy not reachable",
+                f"Start it: headroom proxy --port 8787"
+                + (f" · last error: {err}" if err else ""))
+
+    lifetime = hr.get("lifetime_tokens_saved", 0)
+    session = hr.get("tokens_saved_all_layers", 0)
+    seen = hr.get("api_requests", 0)
+    when = (hr.get("last_activity_at") or "")[:16].replace("T", " ")
+
+    if seen == 0:
+        detail = (
+            f"The proxy is up but has handled 0 API requests since it started, so the "
+            f"session counter reads zero. Lifetime total on disk: "
+            f"{lifetime:,} tokens over {hr.get('lifetime_requests', 0):,} requests"
+            + (f", last real traffic {when} UTC" if when else "")
+            + ". If that timestamp is stale, Claude Code is not routing through the "
+              "proxy: check ANTHROPIC_BASE_URL in .claude/settings.local.json and "
+              "restart Claude Code - a session started before the wiring keeps its "
+              "old environment."
+        )
+        status = "observed" if lifetime else "pending"
+        headline = (f"{lifetime:,} tokens saved lifetime · idle now"
+                    if lifetime else "No traffic through the proxy yet")
+        return (status, headline, detail)
+
+    return ("live", f"{lifetime or session:,} tokens saved lifetime",
+            f"{seen} request(s) this proxy session · "
+            f"{hr.get('requests_compressed', 0)} compressed · "
+            f"avg {hr.get('avg_compression_pct', 0):.1f}% · "
+            f"{session:,} tokens saved since the proxy started"
+            + (f" · last traffic {when} UTC" if when else ""))
+
+
 def build_payload() -> dict:
     records = load_records()
     if not records:
         raise SystemExit("No metrics recorded. Run collect.py first.")
 
+    # The first "baseline" record is the before-install reference; the last
+    # record is the current state. They are different questions, and the tiles
+    # that describe *now* must read `latest` - every run the GUI makes is
+    # labelled "baseline", so pinning them to the first record froze the corpus
+    # figure at whatever the repo looked like on day one.
     baseline = next((r for r in records if r["label"] == "baseline"), records[0])
     latest = records[-1]
 
@@ -184,6 +238,7 @@ def build_payload() -> dict:
     periods = session_periods(records)
     sv_status, sv_headline, sv_detail = savior_verdict(savior)
     cv_status, cv_headline, cv_detail = caveman_verdict(latest, periods)
+    hr_status, hr_headline, hr_detail = headroom_verdict(headroom)
 
     # Each tool gets an honest verdict. "Not yet measured" is a real state and is
     # rendered as such — never as a zero, never as a vendor-claimed percentage.
@@ -201,17 +256,9 @@ def build_payload() -> dict:
         {
             "name": "Headroom",
             "affects": "Input tokens",
-            "status": "live" if headroom.get("proxy_reachable") else "inactive",
-            "headline": (
-                f"{headroom.get('tokens_saved_all_layers', 0):,} tokens saved so far"
-                if headroom.get("proxy_reachable") else "Proxy not running"
-            ),
-            "detail": (
-                f"{headroom.get('api_requests', 0)} request(s) seen · "
-                f"{headroom.get('requests_compressed', 0)} compressed · "
-                f"avg {headroom.get('avg_compression_pct', 0):.1f}%"
-            ) if headroom.get("proxy_reachable")
-            else "Start it: headroom proxy --port 8787",
+            "status": hr_status,
+            "headline": hr_headline,
+            "detail": hr_detail,
         },
         {
             "name": "token-savior",
@@ -246,6 +293,7 @@ def build_payload() -> dict:
         "benchmark": bench,
         "tools": tools,
         "headroom": headroom,
+        "headroom_status": hr_status,
         "layers": layers,
         "token_savior": savior,
         "caveman": caveman,
@@ -292,8 +340,15 @@ def bar_rows(items: list[dict], value_key: str, label_key: str,
 
 def render(payload: dict) -> str:
     bench = payload["benchmark"]
-    naive = payload["baseline"]["naive_corpus"]
-    bloat = payload["baseline"].get("untracked_bloat") or {"count": 0, "tokens": 0}
+    # Current state, not day-one state: the corpus grows between runs and a tile
+    # that never moves reads as a broken dashboard.
+    naive = payload["latest"]["naive_corpus"]
+    first = payload["baseline"]["naive_corpus"]
+    corpus_delta = naive["tokens"] - first["tokens"]
+    corpus_note = (f"tokens across {naive['files']} files"
+                   + (f" · {corpus_delta:+,} since '{esc(payload['baseline']['label'])}'"
+                      if corpus_delta else ""))
+    bloat = payload["latest"].get("untracked_bloat") or {"count": 0, "tokens": 0}
     # Name the worst offender when we have it — a bare total invites the question.
     _top = (bloat.get("files") or [{}])[0].get("file")
     bloat_chief = f" &mdash; chiefly <code>{esc(_top)}</code>" if _top else ""
@@ -347,7 +402,26 @@ def render(payload: dict) -> str:
 
     reduction = bench.get("reduction") or 0
     query_cost = int(bench.get("query_tokens") or 0)
-    hr_saved = payload["headroom"].get("tokens_saved_all_layers", 0) if payload["headroom"].get("proxy_reachable") else None
+
+    # graphify benchmarks the graph, not the working tree. Once the repo has
+    # grown past what the graph was built from, the reduction figure stops
+    # moving - which is exactly what a stale graph looks like from outside.
+    bench_naive = int(bench.get("naive_tokens") or 0)
+    graph_stale = bool(bench_naive and naive["tokens"] > bench_naive * 1.15)
+    stale_note = (
+        f'<div class="warn"><strong>Graph is behind the repo:</strong> the benchmark '
+        f'measured a {bench_naive:,}-token corpus but the working tree is now '
+        f'{naive["tokens"]:,} tokens. This reduction factor will not change until the '
+        f'graph is rebuilt (<code>graphify build</code>, then re-run collect.py).</div>'
+        if graph_stale else "")
+
+    # Lifetime, not the current proxy process: the process counter resets on
+    # every restart, so it renders 0 for a tool that has saved millions.
+    hr = payload["headroom"]
+    hr_saved = (hr.get("lifetime_tokens_saved") or hr.get("tokens_saved_all_layers", 0)
+                ) if hr.get("proxy_reachable") else None
+    hr_note = ("tokens, lifetime proxy counter" if payload["headroom_status"] != "observed"
+               else "tokens lifetime · proxy idle this session")
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -471,7 +545,7 @@ def render(payload: dict) -> str:
     <div class="tile">
       <div class="k">Tracked corpus</div>
       <div class="v">{naive["tokens"]:,}</div>
-      <div class="c">tokens across {naive["files"]} files</div>
+      <div class="c">{corpus_note}</div>
     </div>
     <div class="tile">
       <div class="k">Cost to answer one question</div>
@@ -486,7 +560,7 @@ def render(payload: dict) -> str:
     <div class="tile">
       <div class="k">Headroom saved</div>
       <div class="v">{f"{hr_saved:,}" if hr_saved is not None else "&mdash;"}</div>
-      <div class="c">{"tokens, live proxy counter" if hr_saved is not None else "proxy not running"}</div>
+      <div class="c">{hr_note if hr_saved is not None else "proxy not running"}</div>
     </div>
   </div>
 
@@ -511,12 +585,15 @@ def render(payload: dict) -> str:
     <div class="card">
       {bar_rows(questions, "factor", "question", "series-1", "x")}
     </div>
+    {stale_note}
   </section>
 
   <section>
     <h2>Headroom savings by layer</h2>
-    <p class="note">Live counters from the proxy at <code>127.0.0.1:8787</code>. Compression
-      layers only register once real traffic flows through them.</p>
+    <p class="note">Counters from the proxy at <code>127.0.0.1:8787</code>, scoped to the
+      <em>current proxy process</em> &mdash; they restart at zero every time the proxy does,
+      while the lifetime total above is kept on disk. Layers only register once real traffic
+      flows through them.</p>
     <div class="card">
       {bar_rows(payload["layers"], "tokens", "label", "series-1", " tok")}
     </div>
